@@ -13,13 +13,13 @@ MARKER_RE = re.compile(r"ffsec:([A-Za-z0-9._-]+)")
 
 
 def cmd_read(args):
-    value = config.build_core().read(args.key)
+    value = config.build_core().read(args.alias)
     sys.stdout.write(value + ("\n" if args.newline else ""))
 
 
 def cmd_list(args):
-    for name in config.build_core().keys(args.prefix):
-        print(name)
+    for alias in config.build_core().aliases(args.prefix):
+        print(alias)
 
 
 def cmd_run(args):
@@ -38,9 +38,9 @@ def cmd_run(args):
     env = dict(os.environ)
     for spec in specs:
         if "=" not in spec:
-            raise FfSecretsError(f"malformed --env (expected VAR=key): {spec}")
-        var, key = spec.split("=", 1)
-        env[var.strip()] = core.read(key.strip())
+            raise FfSecretsError(f"malformed --env (expected VAR=alias): {spec}")
+        var, alias = spec.split("=", 1)
+        env[var.strip()] = core.read(alias.strip())
     os.execvpe(command[0], command, env)
 
 
@@ -66,22 +66,22 @@ def build_parser():
     parser = argparse.ArgumentParser(prog="ff-secrets", description="Unified access to secrets.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("read", help="print the value of a key")
-    p.add_argument("key")
+    p = sub.add_parser("read", help="print the value of an alias")
+    p.add_argument("alias")
     p.add_argument("-n", "--newline", action="store_true", help="append a trailing newline")
     p.set_defaults(func=cmd_read)
 
-    p = sub.add_parser("list", help="list registry keys")
+    p = sub.add_parser("list", help="list registry aliases")
     p.add_argument("prefix", nargs="?", default="", help="filter by prefix")
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("run", help="run a command with secrets injected as env vars")
-    p.add_argument("--env", action="append", metavar="VAR=key", help="repeatable")
-    p.add_argument("--env-file", metavar="FILE", help="lines of VAR=key")
+    p.add_argument("--env", action="append", metavar="VAR=alias", help="repeatable")
+    p.add_argument("--env-file", metavar="FILE", help="lines of VAR=alias")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("inject", help="resolve ffsec: markers in a template")
+    p = sub.add_parser("inject", help="resolve ffsec:<alias> markers in a template")
     p.add_argument("-i", "--input", metavar="FILE", help="default: stdin")
     p.add_argument("-o", "--output", metavar="FILE", help="default: stdout")
     p.set_defaults(func=cmd_inject)

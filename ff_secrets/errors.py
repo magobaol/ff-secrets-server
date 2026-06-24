@@ -9,11 +9,11 @@ class ConfigError(FfSecretsError):
     """Configuration or registry problem."""
 
 
-class UnknownKey(FfSecretsError):
-    """A logical name is not present in the registry."""
+class UnknownAlias(FfSecretsError):
+    """An alias is not present in the registry."""
 
-    def __init__(self, name):
-        super().__init__(f"unknown logical key: {name}")
+    def __init__(self, alias):
+        super().__init__(f"unknown alias: {alias}")
 
 
 class DriverError(FfSecretsError):
