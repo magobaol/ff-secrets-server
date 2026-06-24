@@ -55,6 +55,8 @@ class OnePasswordConnectServerDriver(Driver):
         if token is None:
             raise DriverError("1Password Connect Server bearer token missing from Keychain — run: ff-secrets token set")
         env = dict(os.environ)
+        # Guarantee `op` resolves even under a minimal PATH, so consumers need not know it exists.
+        env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
         env["OP_CONNECT_HOST"] = self._endpoint
         env["OP_CONNECT_TOKEN"] = token
         return env
