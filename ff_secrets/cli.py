@@ -53,6 +53,11 @@ def cmd_inject(args):
         sys.stdout.write(resolved)
 
 
+def cmd_serve(args):
+    from . import server
+    server.serve(args.host, args.port)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ff-secrets", description="Unified access to secrets.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -76,6 +81,11 @@ def build_parser():
     p.add_argument("-i", "--input", metavar="FILE", help="default: stdin")
     p.add_argument("-o", "--output", metavar="FILE", help="default: stdout")
     p.set_defaults(func=cmd_inject)
+
+    p = sub.add_parser("serve", help="run the read-only HTTP API")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8666)
+    p.set_defaults(func=cmd_serve)
 
     return parser
 
