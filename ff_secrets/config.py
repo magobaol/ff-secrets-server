@@ -47,9 +47,12 @@ def build_driver():
     raise ConfigError(f"unknown driver: {kind}")
 
 
+def registry_path():
+    return Path(_settings().get("registry", DEFAULT_REGISTRY)).expanduser()
+
+
 def load_registry():
-    registry_path = Path(_settings().get("registry", DEFAULT_REGISTRY)).expanduser()
-    return _load_flat_yaml(registry_path)
+    return _load_flat_yaml(registry_path())
 
 
 def build_core():

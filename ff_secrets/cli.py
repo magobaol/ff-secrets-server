@@ -58,6 +58,12 @@ def cmd_serve(args):
     server.serve(args.host, args.port)
 
 
+def cmd_registry_add(args):
+    from . import registry
+    updated = registry.add(config.registry_path(), args.alias, args.reference)
+    print(("updated " if updated else "added ") + args.alias, file=sys.stderr)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ff-secrets", description="Unified access to secrets.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -86,6 +92,13 @@ def build_parser():
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8666)
     p.set_defaults(func=cmd_serve)
+
+    pr = sub.add_parser("registry", help="manage the alias registry")
+    rsub = pr.add_subparsers(dest="registry_cmd", required=True)
+    pa = rsub.add_parser("add", help="add or update an alias -> reference")
+    pa.add_argument("alias")
+    pa.add_argument("reference")
+    pa.set_defaults(func=cmd_registry_add)
 
     return parser
 
