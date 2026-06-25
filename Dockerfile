@@ -9,8 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ff_secrets_server ./ff_secrets_server
 COPY bin ./bin
 
-# Runtime config, registry and bearer are mounted at /app/runtime (see docker-compose.yml).
-ENV FF_SECRETS_CONFIG=/app/runtime/config.yaml
+# Config, registry and bearer are mounted at /app/data (see docker-compose.yml).
+ENV FF_SECRETS_CONFIG=/app/data/config.yaml
 
 EXPOSE 8666
 ENTRYPOINT ["python", "bin/ff-secrets"]

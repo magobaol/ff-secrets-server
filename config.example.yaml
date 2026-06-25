@@ -1,7 +1,6 @@
 # Server runtime config (flat key: value). Copy to config.yaml on the host; not committed.
 driver: 1password-connect-server
-# Connect Server endpoint on the LAN — set the real host:port in the host's config.yaml.
-endpoint: http://CONNECT_HOST:8080
-registry: /app/runtime/registry.yaml
-bearer-type: file
-bearer-path: /app/runtime/bearer
+# Backend endpoint on the LAN (today the 1Password Connect Server) — set the real host:port in the host's config.yaml.
+backend-endpoint: http://CONNECT_HOST:8080
+registry: /app/data/registry.yaml
+bearer-path: /app/data/bearer

@@ -1,22 +1,13 @@
 """1Password Connect Server driver, via the official onepasswordconnectsdk.
 
 The only module that knows about 1Password: op:// references, the Connect SDK
-and the bearer token. The bearer source is pluggable — keychain on macOS (dev),
-file on the server (prod) — so the same driver runs in both places.
+and the bearer token. The bearer is read from a file (bearer-path): the server
+runs on Lisa, where the token lives in a file mounted into the container.
 """
 import os
-import subprocess
 
 from .base import Driver
 from ..errors import DriverError
-
-
-def _bearer_from_keychain(service, account):
-    result = subprocess.run(
-        ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
-        capture_output=True, text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def _bearer_from_file(path):
@@ -27,24 +18,17 @@ def _bearer_from_file(path):
 
 
 class OnePasswordConnectServerDriver(Driver):
-    def __init__(self, endpoint=None, bearer_source=None):
+    def __init__(self, endpoint=None, bearer_path=None):
         self._endpoint = endpoint
-        self._bearer_source = bearer_source or {"type": "keychain"}
+        self._bearer_path = bearer_path
         self._client = None  # lazy: built on first read
 
     def _bearer(self):
-        kind = self._bearer_source.get("type")
-        if kind == "keychain":
-            token = _bearer_from_keychain(
-                self._bearer_source.get("service", "ff-secrets"),
-                self._bearer_source.get("account", "1password-connect-server-bearer"),
-            )
-        elif kind == "file":
-            token = _bearer_from_file(self._bearer_source["path"])
-        else:
-            raise DriverError(f"unknown bearer source: {kind!r}")
+        if not self._bearer_path:
+            raise DriverError("missing 'bearer-path' in config")
+        token = _bearer_from_file(self._bearer_path)
         if not token:
-            raise DriverError(f"bearer token not available from {kind} source")
+            raise DriverError(f"bearer token not available from file: {self._bearer_path}")
         return token
 
     def _get_client(self):

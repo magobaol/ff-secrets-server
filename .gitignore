@@ -3,6 +3,4 @@ __pycache__/
 .venv/
 
 # Host runtime files (never commit the bearer or live config)
-/config.yaml
-/registry.yaml
-/bearer
+/data/
