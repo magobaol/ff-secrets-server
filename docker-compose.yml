@@ -1,0 +1,15 @@
+# Deploy on Lisa, next to the 1Password Connect Server.
+# Runtime files (config.yaml, registry.yaml, bearer) live beside this file and
+# are NOT committed — create them on the host. See config.example.yaml.
+services:
+  ff-secrets-server:
+    build: .
+    image: ff-secrets-server:latest
+    container_name: ff-secrets-server
+    ports:
+      - "8666:8666"
+    volumes:
+      - "./config.yaml:/app/runtime/config.yaml:ro"
+      - "./registry.yaml:/app/runtime/registry.yaml:ro"
+      - "./bearer:/app/runtime/bearer:ro"
+    restart: always

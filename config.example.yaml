@@ -1,0 +1,6 @@
+# Server runtime config (flat key: value). Copy to config.yaml on the host; not committed.
+driver: 1password-connect-server
+endpoint: http://192.168.178.105:8080
+registry: /app/runtime/registry.yaml
+bearer-type: file
+bearer-path: /app/runtime/bearer
