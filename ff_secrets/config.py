@@ -38,7 +38,12 @@ def build_driver():
     settings = _settings()
     kind = settings.get("driver", "1password-connect-server")
     if kind == "1password-connect-server":
-        return OnePasswordConnectServerDriver(endpoint=settings.get("endpoint"))
+        bearer_source = {"type": settings.get("bearer-type", "keychain")}
+        if "bearer-path" in settings:
+            bearer_source["path"] = settings["bearer-path"]
+        return OnePasswordConnectServerDriver(
+            endpoint=settings.get("endpoint"), bearer_source=bearer_source
+        )
     raise ConfigError(f"unknown driver: {kind}")
 
 

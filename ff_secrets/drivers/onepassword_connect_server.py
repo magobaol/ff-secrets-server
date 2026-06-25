@@ -1,7 +1,8 @@
-"""1Password Connect Server driver.
+"""1Password Connect Server driver, via the official onepasswordconnectsdk.
 
-The only module that knows about 1Password: op:// references, the `op` CLI,
-the 1Password Connect Server endpoint, and the bearer token in the macOS Keychain.
+The only module that knows about 1Password: op:// references, the Connect SDK
+and the bearer token. The bearer source is pluggable — keychain on macOS (dev),
+file on the server (prod) — so the same driver runs in both places.
 """
 import os
 import subprocess
@@ -9,12 +10,8 @@ import subprocess
 from .base import Driver
 from ..errors import DriverError
 
-KEYCHAIN_SERVICE = "ff-secrets"
-KEYCHAIN_ACCOUNT = "1password-connect-server-bearer"
 
-
-def _keychain_get(service, account):
-    """Return the stored password, or None if absent."""
+def _bearer_from_keychain(service, account):
     result = subprocess.run(
         ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
         capture_output=True, text=True,
@@ -22,45 +19,58 @@ def _keychain_get(service, account):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _keychain_set(service, account, value):
-    """Create or update a generic password."""
-    result = subprocess.run(
-        ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", value],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise DriverError(f"keychain write failed: {result.stderr.strip()}")
+def _bearer_from_file(path):
+    try:
+        return open(os.path.expanduser(path)).read().strip()
+    except OSError:
+        return None
 
 
 class OnePasswordConnectServerDriver(Driver):
-    def __init__(self, endpoint=None):
+    def __init__(self, endpoint=None, bearer_source=None):
         self._endpoint = endpoint
+        self._bearer_source = bearer_source or {"type": "keychain"}
+        self._client = None  # lazy: built on first read
+
+    def _bearer(self):
+        kind = self._bearer_source.get("type")
+        if kind == "keychain":
+            token = _bearer_from_keychain(
+                self._bearer_source.get("service", "ff-secrets"),
+                self._bearer_source.get("account", "1password-connect-server-bearer"),
+            )
+        elif kind == "file":
+            token = _bearer_from_file(self._bearer_source["path"])
+        else:
+            raise DriverError(f"unknown bearer source: {kind!r}")
+        if not token:
+            raise DriverError(f"bearer token not available from {kind} source")
+        return token
+
+    def _get_client(self):
+        if self._client is None:
+            if not self._endpoint:
+                raise DriverError("missing 'endpoint' in config")
+            try:
+                from onepasswordconnectsdk.client import new_client
+            except ImportError:
+                raise DriverError("onepasswordconnectsdk not installed")
+            self._client = new_client(self._endpoint, self._bearer())
+        return self._client
 
     def read(self, reference):
+        """Resolve an op://vault/item/field reference to its value."""
+        if not reference.startswith("op://"):
+            raise DriverError(f"not an op:// reference: {reference}")
+        parts = reference[len("op://"):].split("/")
+        if len(parts) != 3:
+            raise DriverError(f"malformed op:// reference: {reference}")
+        vault, item, field = parts
         try:
-            result = subprocess.run(
-                ["op", "read", reference],
-                capture_output=True, text=True, env=self._op_env(),
-            )
-        except FileNotFoundError:
-            raise DriverError("'op' not found in PATH (1Password CLI required)")
-        if result.returncode != 0:
-            raise DriverError(f"op read failed for {reference}: {result.stderr.strip()}")
-        return result.stdout.rstrip("\n")
-
-    def _op_env(self):
-        if not self._endpoint:
-            raise DriverError("missing 'endpoint' in config")
-        token = _keychain_get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        if token is None:
-            raise DriverError("1Password Connect Server bearer token missing from Keychain — run: ff-secrets token set")
-        env = dict(os.environ)
-        # Guarantee `op` resolves even under a minimal PATH, so consumers need not know it exists.
-        env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
-        env["OP_CONNECT_HOST"] = self._endpoint
-        env["OP_CONNECT_TOKEN"] = token
-        return env
-
-    def set_credential(self, value):
-        """Store or rotate the 1Password Connect Server bearer token in the Keychain."""
-        _keychain_set(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, value)
+            it = self._get_client().get_item(item, vault)
+        except Exception as e:
+            raise DriverError(f"Connect get_item failed for {reference}: {e}")
+        for f in it.fields:
+            if field in ((f.label or ""), (f.id or "")):
+                return f.value
+        raise DriverError(f"field '{field}' not found in {reference}")

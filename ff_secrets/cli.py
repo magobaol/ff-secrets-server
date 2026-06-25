@@ -1,6 +1,5 @@
 """Command-line surface: parses arguments and drives the core."""
 import argparse
-import getpass
 import os
 import re
 import sys
@@ -54,14 +53,6 @@ def cmd_inject(args):
         sys.stdout.write(resolved)
 
 
-def cmd_token_set(args):
-    token = sys.stdin.read().strip() if not sys.stdin.isatty() else getpass.getpass("Token: ")
-    if not token:
-        raise FfSecretsError("empty token")
-    config.build_driver().set_credential(token)
-    print("Token stored.", file=sys.stderr)
-
-
 def build_parser():
     parser = argparse.ArgumentParser(prog="ff-secrets", description="Unified access to secrets.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -85,11 +76,6 @@ def build_parser():
     p.add_argument("-i", "--input", metavar="FILE", help="default: stdin")
     p.add_argument("-o", "--output", metavar="FILE", help="default: stdout")
     p.set_defaults(func=cmd_inject)
-
-    p = sub.add_parser("token", help="manage the bearer token")
-    tsub = p.add_subparsers(dest="token_cmd", required=True)
-    ps = tsub.add_parser("set", help="store/rotate the bearer in the Keychain")
-    ps.set_defaults(func=cmd_token_set)
 
     return parser
 

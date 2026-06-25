@@ -11,7 +11,3 @@ class Driver:
 
     def read(self, reference: str) -> str:
         raise NotImplementedError
-
-    def set_credential(self, value: str) -> None:
-        """Store or rotate the driver's root credential (its auth to the backend)."""
-        raise NotImplementedError
