@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
 
 # Host runtime files (never commit the bearer or live config)
 /data/
