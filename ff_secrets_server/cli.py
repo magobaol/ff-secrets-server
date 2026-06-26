@@ -64,6 +64,25 @@ def cmd_registry_add(args):
     print(("updated " if updated else "added ") + args.alias, file=sys.stderr)
 
 
+_RULE = "─" * 56
+
+
+def _ask(prompt):
+    """Write the prompt to stderr, read a line from stdin. '' on EOF."""
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    try:
+        return input().strip()
+    except EOFError:
+        return ""
+
+
+def _prune_reason(prune):
+    if prune["kind"] == "item":
+        return f'the 1Password item "{prune["item"]}" no longer exists in the vault'
+    return f'the field "{prune["field"]}" no longer exists in item "{prune["item"]}"'
+
+
 def cmd_registry_sync(args):
     from . import registry, sync
 
@@ -75,54 +94,98 @@ def cmd_registry_sync(args):
     driver = config.build_driver()
     contents = {vault: driver.list_items(vault) for vault in vaults}
 
-    can_ask = sys.stdin.isatty()
-
-    def ask_namespace(vault, item, field):
-        head = f"new item not in the registry:\n  vault: {vault}\n  item : {item}\n  field: {field}"
-        if args.dry_run:
-            print(head + "\n  (would prompt for a namespace)", file=sys.stderr)
-            return ""
-        if not can_ask:
-            print(head + "\n  ! skipped (no namespace, non-interactive)", file=sys.stderr)
-            return ""
-        sys.stderr.write(head + "\n  namespace for this item (e.g. 'hootsuite.slack'), empty to skip: ")
-        sys.stderr.flush()
-        return input().strip()
-
     def eligible(field):
         # Secrets live in CONCEALED fields with a value; everything else
         # (notes, usernames, dates, urls) is structural noise.
         return field["has_value"] and field["type"] == "CONCEALED"
 
-    adds, prunes, warnings = sync.plan(current, contents, ask_namespace, eligible)
+    found = sync.discover(current, contents, eligible)
+    out = sys.stderr
 
-    for warning in warnings:
-        print(f"warning: {warning}", file=sys.stderr)
-    if not adds and not prunes:
-        print("registry already in sync; nothing to do.", file=sys.stderr)
+    namespaces = sync.item_namespaces(current)
+    total = sum(len(items) for items in contents.values())
+    known = sum(1 for vault, items in contents.items()
+                for entry in items if (vault, entry["item"]) in namespaces)
+    label = ", ".join(f'"{vault}"' for vault in vaults)
+    print(f'\nScanning vault {label}… {total} items, {known} already mapped.', file=out)
+
+    for warning in found["warnings"]:
+        print(f"warning: {warning}", file=out)
+
+    can_ask = sys.stdin.isatty() and not args.dry_run
+    taken = set(current) | {alias for alias, _ in found["auto_adds"]}
+    chosen_adds = []
+
+    for entry in found["new_items"]:
+        item = entry["item"]
+        fields = entry["fields"]
+        names = ", ".join(name for name, _ in fields)
+        print(f"\n▸ In the vault but NOT in the registry yet:\n", file=out)
+        print(f"    1Password item:  {item}", file=out)
+        print(f"    Secret field{'s' if len(fields) != 1 else ''}:   {names}", file=out)
+        print(f"\n    An alias is  <prefix>.<field>  — e.g.  hootsuite.slack.credential, bear.iphone.credential", file=out)
+        print(f"    You pick the prefix; the field name is appended for you.", file=out)
+        if not can_ask:
+            note = "would prompt for a prefix" if args.dry_run else "no terminal to ask for a prefix; skipped"
+            print(f"    ({note})", file=out)
+            continue
+        suggested = sync.slugify(item)
+        prefix = _ask(f"\n    Prefix for this item  (Enter to skip · suggested: {suggested})\n    > ")
+        if not prefix:
+            continue
+        for name, _ref in fields:
+            slug = sync.slugify(name)
+            if prefix == slug or prefix.endswith("." + slug):
+                print(f'    note: the field name is appended automatically, so this becomes "{prefix}.{slug}".', file=out)
+                break
+        adds_here = []
+        for name, reference in fields:
+            alias = f"{prefix}.{sync.slugify(name)}"
+            if alias in taken:
+                print(f'    skipped "{alias}" (already exists)', file=out)
+                continue
+            taken.add(alias)
+            adds_here.append((alias, reference))
+        if adds_here:
+            width = max(len(alias) for alias, _ in adds_here)
+            print(f"\n    Will add:", file=out)
+            for alias, reference in adds_here:
+                print(f"      {alias.ljust(width)}  →  {reference}", file=out)
+            chosen_adds.extend(adds_here)
+
+    all_adds = found["auto_adds"] + chosen_adds
+    prunes = found["prunes"]
+    if not all_adds and not prunes:
+        print("\nRegistry already in sync; nothing to do.", file=out)
         return
 
-    print("\nplanned changes:", file=sys.stderr)
-    for alias, reference in adds:
-        print(f"  + {alias}  ->  {reference}", file=sys.stderr)
-    for alias, _reference, reason in prunes:
-        print(f"  - {alias}  ({reason})", file=sys.stderr)
+    print(f"\n{_RULE}\nPLANNED CHANGES", file=out)
+    if all_adds:
+        width = max(len(alias) for alias, _ in all_adds)
+        print(f"\n  ADD ({len(all_adds)})", file=out)
+        for alias, reference in all_adds:
+            print(f"    + {alias.ljust(width)}  →  {reference}", file=out)
+    if prunes:
+        print(f"\n  REMOVE ({len(prunes)})", file=out)
+        for prune in prunes:
+            print(f"    − {prune['alias']}", file=out)
+            print(f"        {_prune_reason(prune)}", file=out)
 
     if args.dry_run:
-        print("\ndry run; registry unchanged.", file=sys.stderr)
+        print("\n(dry run; registry unchanged)", file=out)
         return
     if not args.yes:
-        if not can_ask:
-            print("\nnon-interactive and --yes not given; registry unchanged.", file=sys.stderr)
+        if not sys.stdin.isatty():
+            print("\nnon-interactive and --yes not given; registry unchanged.", file=out)
             return
-        sys.stderr.write(f"\napply {len(adds)} add(s) and {len(prunes)} prune(s)? [y/N] ")
-        sys.stderr.flush()
-        if input().strip().lower() not in ("y", "yes"):
-            print("aborted; registry unchanged.", file=sys.stderr)
+        answer = _ask(f"\n{_RULE}\nApply {len(all_adds)} addition(s) and {len(prunes)} removal(s)?  [y/N] ")
+        if answer.lower() not in ("y", "yes"):
+            print("Aborted; registry unchanged.", file=out)
             return
 
-    registry.apply_changes(config.registry_path(), adds, prunes)
-    print(f"registry updated: +{len(adds)} -{len(prunes)}", file=sys.stderr)
+    prune_rows = [(prune["alias"], prune["reference"], prune["kind"]) for prune in prunes]
+    registry.apply_changes(config.registry_path(), all_adds, prune_rows)
+    print(f"\nRegistry updated: +{len(all_adds)} −{len(prunes)}.", file=out)
 
 
 def build_parser():

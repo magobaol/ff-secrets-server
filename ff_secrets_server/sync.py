@@ -66,23 +66,26 @@ def vaults_in_registry(registry):
     return vaults
 
 
-def plan(registry, contents, ask_namespace, eligible):
-    """Compute the sync plan.
+def discover(registry, contents, eligible):
+    """Reconcile the registry against the vault, without any prompting.
 
     registry: dict alias -> reference (current state).
     contents: dict vault_title -> list of {item, fields:[{label,id,type,has_value}]}.
-    ask_namespace(vault, item, field) -> namespace ('' to skip the item).
     eligible(field) -> bool: whether a field deserves an alias.
 
-    Returns (adds, prunes, warnings):
-      adds:   list of (alias, reference)
-      prunes: list of (alias, reference, reason)
-      warnings: list of str
+    Returns a dict:
+      auto_adds: [(alias, reference)] for fields of items already in the
+                 registry — the prefix is inherited, no human needed.
+      new_items: [{vault, item, fields:[(field_name, reference)]}] for items
+                 not yet in the registry — the caller must pick a prefix.
+      prunes:    [{alias, reference, kind, vault, item, field}] where kind is
+                 'item' (item gone) or 'field' (field gone).
+      warnings:  [str].
     """
-    adds, prunes, warnings = [], [], []
     namespaces = item_namespaces(registry)
     existing_refs = {ref.strip() for ref in registry.values()}
-    taken_aliases = set(registry)
+    taken = set(registry)
+    auto_adds, prunes, warnings = [], [], []
 
     # Index of fields present in the vault, for prune: (vault, item) -> {label|id}.
     present = {}
@@ -96,7 +99,9 @@ def plan(registry, contents, ask_namespace, eligible):
                     keys.add(field["id"])
             present[(vault, entry["item"])] = keys
 
-    # ADD: eligible fields in the vault not yet referenced by any alias.
+    # ADD discovery: eligible fields not yet referenced. Known items add
+    # automatically; unknown items are grouped for the caller to name.
+    new_fields, order = {}, []
     for vault, items in contents.items():
         for entry in items:
             item = entry["item"]
@@ -110,30 +115,42 @@ def plan(registry, contents, ask_namespace, eligible):
                 key = (vault, item)
                 namespace = namespaces.get(key)
                 if namespace is _CONFLICT:
-                    warnings.append(f"item '{item}' maps to multiple namespaces in the registry; skipped {reference}")
+                    warnings.append(f'item "{item}" maps to multiple prefixes in the registry; skipped {reference}')
                     continue
                 if namespace is None:
-                    namespace = ask_namespace(vault, item, field_name)
-                    if not namespace:
-                        continue
-                    namespaces[key] = namespace  # reuse for further fields of the same new item
-                alias = f"{namespace}.{slugify(field_name)}"
-                if alias in taken_aliases:
-                    warnings.append(f"alias '{alias}' already taken; skipped {reference}")
+                    if key not in new_fields:
+                        new_fields[key] = []
+                        order.append(key)
+                    new_fields[key].append((field_name, reference))
                     continue
-                taken_aliases.add(alias)
-                adds.append((alias, reference))
+                alias = f"{namespace}.{slugify(field_name)}"
+                if alias in taken:
+                    warnings.append(f'alias "{alias}" already exists; skipped {reference}')
+                    continue
+                taken.add(alias)
+                auto_adds.append((alias, reference))
+
+    new_items = [
+        {"vault": vault, "item": item, "fields": new_fields[(vault, item)]}
+        for (vault, item) in order
+    ]
 
     # PRUNE: aliases whose referenced item or field no longer exists.
     for alias, reference in registry.items():
         parsed = parse_reference(reference)
         if not parsed:
-            warnings.append(f"alias '{alias}' has a non-op:// reference, left as-is: {reference}")
+            warnings.append(f'alias "{alias}" has a non-op:// reference, left as-is: {reference}')
             continue
         vault, item, field = parsed
         keys = present.get((vault, item))
         if keys is None:
-            prunes.append((alias, reference, "item not found"))
+            kind = "item"
         elif field not in keys:
-            prunes.append((alias, reference, "field not found"))
-    return adds, prunes, warnings
+            kind = "field"
+        else:
+            continue
+        prunes.append({"alias": alias, "reference": reference, "kind": kind,
+                       "vault": vault, "item": item, "field": field})
+
+    return {"auto_adds": auto_adds, "new_items": new_items,
+            "prunes": prunes, "warnings": warnings}
