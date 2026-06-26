@@ -58,3 +58,31 @@ class OnePasswordConnectServerDriver(Driver):
             if field in ((f.label or ""), (f.id or "")):
                 return f.value
         raise DriverError(f"field '{field}' not found in {reference}")
+
+    def list_items(self, vault):
+        """Enumerate a vault: every item with its field metadata (no values)."""
+        client = self._get_client()
+        try:
+            v = client.get_vault_by_title(vault)
+        except Exception as e:
+            raise DriverError(f"Connect get_vault failed for '{vault}': {e}")
+        try:
+            summaries = client.get_items(v.id)
+        except Exception as e:
+            raise DriverError(f"Connect get_items failed for '{vault}': {e}")
+        items = []
+        for s in summaries:
+            if getattr(s, "trashed", False):
+                continue
+            full = client.get_item(s.id, v.id)
+            fields = [
+                {
+                    "label": f.label or "",
+                    "id": f.id or "",
+                    "type": f.type or "",
+                    "has_value": bool(getattr(f, "value", None)),
+                }
+                for f in (full.fields or [])
+            ]
+            items.append({"item": full.title, "fields": fields})
+        return items

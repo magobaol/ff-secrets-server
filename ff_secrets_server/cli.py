@@ -64,6 +64,67 @@ def cmd_registry_add(args):
     print(("updated " if updated else "added ") + args.alias, file=sys.stderr)
 
 
+def cmd_registry_sync(args):
+    from . import registry, sync
+
+    current = config.load_registry()
+    vaults = args.vault or sync.vaults_in_registry(current)
+    if not vaults:
+        raise FfSecretsError("no vault to sync (registry empty and no --vault given)")
+
+    driver = config.build_driver()
+    contents = {vault: driver.list_items(vault) for vault in vaults}
+
+    can_ask = sys.stdin.isatty()
+
+    def ask_namespace(vault, item, field):
+        head = f"new item not in the registry:\n  vault: {vault}\n  item : {item}\n  field: {field}"
+        if args.dry_run:
+            print(head + "\n  (would prompt for a namespace)", file=sys.stderr)
+            return ""
+        if not can_ask:
+            print(head + "\n  ! skipped (no namespace, non-interactive)", file=sys.stderr)
+            return ""
+        sys.stderr.write(head + "\n  namespace for this item (e.g. 'hootsuite.slack'), empty to skip: ")
+        sys.stderr.flush()
+        return input().strip()
+
+    def eligible(field):
+        # Secrets live in CONCEALED fields with a value; everything else
+        # (notes, usernames, dates, urls) is structural noise.
+        return field["has_value"] and field["type"] == "CONCEALED"
+
+    adds, prunes, warnings = sync.plan(current, contents, ask_namespace, eligible)
+
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if not adds and not prunes:
+        print("registry already in sync; nothing to do.", file=sys.stderr)
+        return
+
+    print("\nplanned changes:", file=sys.stderr)
+    for alias, reference in adds:
+        print(f"  + {alias}  ->  {reference}", file=sys.stderr)
+    for alias, _reference, reason in prunes:
+        print(f"  - {alias}  ({reason})", file=sys.stderr)
+
+    if args.dry_run:
+        print("\ndry run; registry unchanged.", file=sys.stderr)
+        return
+    if not args.yes:
+        if not can_ask:
+            print("\nnon-interactive and --yes not given; registry unchanged.", file=sys.stderr)
+            return
+        sys.stderr.write(f"\napply {len(adds)} add(s) and {len(prunes)} prune(s)? [y/N] ")
+        sys.stderr.flush()
+        if input().strip().lower() not in ("y", "yes"):
+            print("aborted; registry unchanged.", file=sys.stderr)
+            return
+
+    registry.apply_changes(config.registry_path(), adds, prunes)
+    print(f"registry updated: +{len(adds)} -{len(prunes)}", file=sys.stderr)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ff-secrets", description="Unified access to secrets.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -99,6 +160,13 @@ def build_parser():
     pa.add_argument("alias")
     pa.add_argument("reference")
     pa.set_defaults(func=cmd_registry_add)
+
+    psy = rsub.add_parser("sync", help="reconcile the registry with the backend vault")
+    psy.add_argument("--vault", action="append", metavar="TITLE",
+                     help="vault to enumerate (repeatable; default: those used by the registry)")
+    psy.add_argument("--dry-run", action="store_true", help="show the plan without writing")
+    psy.add_argument("-y", "--yes", action="store_true", help="apply without the confirmation prompt")
+    psy.set_defaults(func=cmd_registry_sync)
 
     return parser
 

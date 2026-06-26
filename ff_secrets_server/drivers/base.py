@@ -11,3 +11,12 @@ class Driver:
 
     def read(self, reference: str) -> str:
         raise NotImplementedError
+
+    def list_items(self, vault: str) -> list:
+        """Enumerate a vault for the `registry sync` admin command.
+
+        Returns a list of {item, fields:[{label, id, type, has_value}]} —
+        metadata only, never the secret values. A backend that cannot enumerate
+        leaves this unimplemented.
+        """
+        raise NotImplementedError
