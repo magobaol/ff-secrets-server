@@ -54,4 +54,6 @@ def load_registry():
 
 
 def build_core():
-    return Core(load_registry(), build_driver())
+    # Pass the loader (not its result) so the registry is re-read per request,
+    # making registry edits effective without restarting the server.
+    return Core(load_registry, build_driver())
