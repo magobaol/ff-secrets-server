@@ -9,12 +9,18 @@ from pathlib import Path
 
 def _atomic_write(path, text):
     """Write via a temp file in the same directory + os.replace, so a reader
-    (the hot-reloading server) never sees a half-written registry."""
+    (the hot-reloading server) never sees a half-written registry.
+
+    mkstemp creates the temp file 0600; preserve the existing file's mode
+    (default 0644) so the registry stays readable to backups and other readers.
+    """
     path = Path(path)
+    mode = (path.stat().st_mode & 0o777) if path.exists() else 0o644
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".registry-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as fh:
             fh.write(text)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         try:
